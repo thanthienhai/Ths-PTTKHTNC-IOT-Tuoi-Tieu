@@ -1,0 +1,120 @@
+name: CD Pipeline
+
+on:
+  push:
+    branches: [ main ]
+    tags:
+      - 'v*'
+
+jobs:
+  deploy-staging:
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    environment: staging
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: 'latest'
+
+      - name: Configure kubectl
+        run: |
+          echo "${{ secrets.KUBE_CONFIG_STAGING }}" | base64 -d > kubeconfig
+          export KUBECONFIG=./kubeconfig
+
+      - name: Deploy to staging
+        run: |
+          kubectl apply -f k8s/namespace.yml
+          kubectl apply -f k8s/configmap.yml
+          kubectl apply -f k8s/secrets.yml
+          kubectl apply -f k8s/deployments/
+          kubectl apply -f k8s/services/
+          kubectl apply -f k8s/ingress.yml
+          kubectl rollout status deployment -n irrigation-staging
+
+      - name: Run smoke tests
+        run: |
+          npm ci
+          npm run test:smoke -- --env=staging
+
+      - name: Notify deployment
+        if: always()
+        uses: 8398a7/action-slack@v3
+        with:
+          status: ${{ job.status }}
+          text: 'Staging deployment ${{ job.status }}'
+          webhook_url: ${{ secrets.SLACK_WEBHOOK }}
+
+  deploy-production:
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    environment: production
+    needs: []
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: 'latest'
+
+      - name: Configure kubectl
+        run: |
+          echo "${{ secrets.KUBE_CONFIG_PRODUCTION }}" | base64 -d > kubeconfig
+          export KUBECONFIG=./kubeconfig
+
+      - name: Blue-Green Deployment
+        run: |
+          # Deploy green environment
+          kubectl apply -f k8s/namespace.yml
+          kubectl apply -f k8s/configmap.yml
+          kubectl apply -f k8s/secrets.yml
+          
+          # Update image tags to new version
+          export VERSION=${GITHUB_REF#refs/tags/}
+          envsubst < k8s/deployments/api-gateway.yml | kubectl apply -f -
+          envsubst < k8s/deployments/sensor-service.yml | kubectl apply -f -
+          envsubst < k8s/deployments/irrigation-service.yml | kubectl apply -f -
+          envsubst < k8s/deployments/weather-service.yml | kubectl apply -f -
+          envsubst < k8s/deployments/alert-service.yml | kubectl apply -f -
+          envsubst < k8s/deployments/user-service.yml | kubectl apply -f -
+          envsubst < k8s/deployments/device-service.yml | kubectl apply -f -
+          envsubst < k8s/deployments/analytics-service.yml | kubectl apply -f -
+          envsubst < k8s/deployments/report-service.yml | kubectl apply -f -
+          
+          # Wait for rollout
+          kubectl rollout status deployment -n irrigation-production --timeout=10m
+
+      - name: Run smoke tests
+        run: |
+          npm ci
+          npm run test:smoke -- --env=production
+
+      - name: Switch traffic (complete blue-green)
+        run: |
+          kubectl apply -f k8s/services/
+          kubectl apply -f k8s/ingress.yml
+
+      - name: Verify deployment
+        run: |
+          kubectl get pods -n irrigation-production
+          kubectl get services -n irrigation-production
+
+      - name: Rollback on failure
+        if: failure()
+        run: |
+          kubectl rollout undo deployment -n irrigation-production
+
+      - name: Notify deployment
+        if: always()
+        uses: 8398a7/action-slack@v3
+        with:
+          status: ${{ job.status }}
+          text: 'Production deployment ${{ job.status }} - Version ${{ github.ref }}'
+          webhook_url: ${{ secrets.SLACK_WEBHOOK }}

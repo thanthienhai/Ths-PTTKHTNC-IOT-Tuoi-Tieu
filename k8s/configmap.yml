@@ -1,0 +1,33 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: irrigation-config
+  namespace: irrigation-production
+data:
+  NODE_ENV: "production"
+  POSTGRES_HOST: "postgres-service"
+  POSTGRES_PORT: "5432"
+  POSTGRES_DB: "irrigation_db"
+  MONGODB_HOST: "mongodb-service"
+  MONGODB_PORT: "27017"
+  REDIS_HOST: "redis-service"
+  REDIS_PORT: "6379"
+  RABBITMQ_HOST: "rabbitmq-service"
+  RABBITMQ_PORT: "5672"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: irrigation-config
+  namespace: irrigation-staging
+data:
+  NODE_ENV: "staging"
+  POSTGRES_HOST: "postgres-service"
+  POSTGRES_PORT: "5432"
+  POSTGRES_DB: "irrigation_db"
+  MONGODB_HOST: "mongodb-service"
+  MONGODB_PORT: "27017"
+  REDIS_HOST: "redis-service"
+  REDIS_PORT: "6379"
+  RABBITMQ_HOST: "rabbitmq-service"
+  RABBITMQ_PORT: "5672"

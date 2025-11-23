@@ -1,0 +1,309 @@
+version: '3.8'
+
+services:
+  # Databases
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: irrigation_db
+      POSTGRES_USER: irrigation_user
+      POSTGRES_PASSWORD: irrigation_pass
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U irrigation_user"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  mongodb:
+    image: mongo:7
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: mongo_user
+      MONGO_INITDB_ROOT_PASSWORD: mongo_pass
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Message Queue
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    environment:
+      RABBITMQ_DEFAULT_USER: rabbitmq_user
+      RABBITMQ_DEFAULT_PASS: rabbitmq_pass
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # API Gateway
+  api-gateway:
+    build:
+      context: ./services/api-gateway
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: development
+      PORT: 3000
+      POSTGRES_URL: postgresql://irrigation_user:irrigation_pass@postgres:5432/irrigation_db
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: dev_jwt_secret_change_in_production
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./services/api-gateway:/app
+      - /app/node_modules
+
+  # Sensor Service
+  sensor-service:
+    build:
+      context: ./services/sensor-service
+      dockerfile: Dockerfile
+    ports:
+      - "3001:3001"
+    environment:
+      NODE_ENV: development
+      PORT: 3001
+      MONGODB_URL: mongodb://mongo_user:mongo_pass@mongodb:27017
+      REDIS_URL: redis://redis:6379
+      RABBITMQ_URL: amqp://rabbitmq_user:rabbitmq_pass@rabbitmq:5672
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+      - ./services/sensor-service:/app
+      - /app/node_modules
+
+  # Irrigation Service
+  irrigation-service:
+    build:
+      context: ./services/irrigation-service
+      dockerfile: Dockerfile
+    ports:
+      - "3002:3002"
+    environment:
+      NODE_ENV: development
+      PORT: 3002
+      POSTGRES_URL: postgresql://irrigation_user:irrigation_pass@postgres:5432/irrigation_db
+      MONGODB_URL: mongodb://mongo_user:mongo_pass@mongodb:27017
+      REDIS_URL: redis://redis:6379
+      RABBITMQ_URL: amqp://rabbitmq_user:rabbitmq_pass@rabbitmq:5672
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mongodb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+      - ./services/irrigation-service:/app
+      - /app/node_modules
+
+  # Weather Service
+  weather-service:
+    build:
+      context: ./services/weather-service
+      dockerfile: Dockerfile
+    ports:
+      - "3003:3003"
+    environment:
+      NODE_ENV: development
+      PORT: 3003
+      POSTGRES_URL: postgresql://irrigation_user:irrigation_pass@postgres:5432/irrigation_db
+      REDIS_URL: redis://redis:6379
+      WEATHER_API_KEY: ${WEATHER_API_KEY}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./services/weather-service:/app
+      - /app/node_modules
+
+  # Alert Service
+  alert-service:
+    build:
+      context: ./services/alert-service
+      dockerfile: Dockerfile
+    ports:
+      - "3004:3004"
+    environment:
+      NODE_ENV: development
+      PORT: 3004
+      POSTGRES_URL: postgresql://irrigation_user:irrigation_pass@postgres:5432/irrigation_db
+      RABBITMQ_URL: amqp://rabbitmq_user:rabbitmq_pass@rabbitmq:5672
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+      - ./services/alert-service:/app
+      - /app/node_modules
+
+  # User Service
+  user-service:
+    build:
+      context: ./services/user-service
+      dockerfile: Dockerfile
+    ports:
+      - "3005:3005"
+    environment:
+      NODE_ENV: development
+      PORT: 3005
+      POSTGRES_URL: postgresql://irrigation_user:irrigation_pass@postgres:5432/irrigation_db
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./services/user-service:/app
+      - /app/node_modules
+
+  # Device Service
+  device-service:
+    build:
+      context: ./services/device-service
+      dockerfile: Dockerfile
+    ports:
+      - "3006:3006"
+    environment:
+      NODE_ENV: development
+      PORT: 3006
+      POSTGRES_URL: postgresql://irrigation_user:irrigation_pass@postgres:5432/irrigation_db
+      MONGODB_URL: mongodb://mongo_user:mongo_pass@mongodb:27017
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mongodb:
+        condition: service_healthy
+    volumes:
+      - ./services/device-service:/app
+      - /app/node_modules
+
+  # Analytics Service
+  analytics-service:
+    build:
+      context: ./services/analytics-service
+      dockerfile: Dockerfile
+    ports:
+      - "3007:3007"
+    environment:
+      NODE_ENV: development
+      PORT: 3007
+      MONGODB_URL: mongodb://mongo_user:mongo_pass@mongodb:27017
+      POSTGRES_URL: postgresql://irrigation_user:irrigation_pass@postgres:5432/irrigation_db
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./services/analytics-service:/app
+      - /app/node_modules
+
+  # Report Service
+  report-service:
+    build:
+      context: ./services/report-service
+      dockerfile: Dockerfile
+    ports:
+      - "3008:3008"
+    environment:
+      NODE_ENV: development
+      PORT: 3008
+      MONGODB_URL: mongodb://mongo_user:mongo_pass@mongodb:27017
+      POSTGRES_URL: postgresql://irrigation_user:irrigation_pass@postgres:5432/irrigation_db
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./services/report-service:/app
+      - /app/node_modules
+
+  # Dashboard
+  dashboard:
+    build:
+      context: ./dashboard
+      dockerfile: Dockerfile
+    ports:
+      - "8080:80"
+    environment:
+      VITE_API_URL: http://api-gateway:3000
+    depends_on:
+      - api-gateway
+
+  # Monitoring
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3100:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards
+      - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources
+    depends_on:
+      - prometheus
+
+volumes:
+  postgres_data:
+  mongodb_data:
+  redis_data:
+  rabbitmq_data:
+  prometheus_data:
+  grafana_data:

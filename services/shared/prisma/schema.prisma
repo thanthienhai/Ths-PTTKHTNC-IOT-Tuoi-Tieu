@@ -1,0 +1,313 @@
+// Prisma schema for PostgreSQL relational data
+// Smart Irrigation IoT System
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("POSTGRES_URL")
+}
+
+// ============================================================================
+// USER & AUTHENTICATION
+// ============================================================================
+
+model User {
+  id            String    @id @default(uuid())
+  username      String    @unique @db.VarChar(50)
+  email         String    @unique @db.VarChar(255)
+  passwordHash  String    @db.VarChar(255)
+  role          UserRole
+  permissions   Json      @default("[]")
+  preferences   Json      @default("{}")
+  isActive      Boolean   @default(true)
+  createdAt     DateTime  @default(now())
+  lastLogin     DateTime?
+  
+  // Relations
+  farms         Farm[]    @relation("FarmOwner")
+  farmAccess    FarmAccess[]
+  schedules     IrrigationSchedule[]
+  alerts        Alert[]   @relation("AlertAcknowledger")
+  reports       Report[]
+  
+  @@index([email])
+  @@index([username])
+  @@map("users")
+}
+
+enum UserRole {
+  farmer
+  manager
+  agronomist
+  technician
+  admin
+}
+
+// ============================================================================
+// FARM & ZONES
+// ============================================================================
+
+model Farm {
+  id          String    @id @default(uuid())
+  name        String    @db.VarChar(100)
+  location    Json      // { latitude, longitude, altitude?, address? }
+  area        Float     // m²
+  ownerId     String
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  
+  // Relations
+  owner       User      @relation("FarmOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  zones       IrrigationZone[]
+  waterSources WaterSource[]
+  farmAccess  FarmAccess[]
+  devices     Device[]
+  
+  @@index([ownerId])
+  @@map("farms")
+}
+
+model FarmAccess {
+  id        String   @id @default(uuid())
+  farmId    String
+  userId    String
+  role      String   @db.VarChar(50)
+  grantedAt DateTime @default(now())
+  
+  // Relations
+  farm      Farm     @relation(fields: [farmId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@unique([farmId, userId])
+  @@index([userId])
+  @@map("farm_access")
+}
+
+model IrrigationZone {
+  id            String    @id @default(uuid())
+  name          String    @db.VarChar(100)
+  farmId        String
+  area          Float     // m²
+  cropType      String    @db.VarChar(100)
+  growthStage   GrowthStage
+  soilType      String    @db.VarChar(100)
+  priority      Int       @default(5) // 1-10
+  sensors       String[]  // Array of sensor IDs
+  actuators     String[]  // Array of actuator IDs
+  configuration Json      // ZoneConfiguration object
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  
+  // Relations
+  farm          Farm      @relation(fields: [farmId], references: [id], onDelete: Cascade)
+  schedules     IrrigationSchedule[]
+  
+  @@index([farmId])
+  @@index([priority])
+  @@map("irrigation_zones")
+}
+
+enum GrowthStage {
+  seedling
+  vegetative
+  flowering
+  fruiting
+  harvest
+}
+
+// ============================================================================
+// IRRIGATION SCHEDULES
+// ============================================================================
+
+model IrrigationSchedule {
+  id            String          @id @default(uuid())
+  zoneId        String
+  startTime     DateTime
+  duration      Int             // minutes
+  flowRate      Float           // liters/minute
+  waterAmount   Float           // liters
+  status        ScheduleStatus  @default(pending)
+  isManual      Boolean         @default(false)
+  createdBy     String
+  executedAt    DateTime?
+  completedAt   DateTime?
+  failureReason String?         @db.Text
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+  
+  // Relations
+  zone          IrrigationZone  @relation(fields: [zoneId], references: [id], onDelete: Cascade)
+  creator       User            @relation(fields: [createdBy], references: [id])
+  
+  @@index([zoneId])
+  @@index([startTime])
+  @@index([status])
+  @@index([createdBy])
+  @@map("irrigation_schedules")
+}
+
+enum ScheduleStatus {
+  pending
+  active
+  completed
+  cancelled
+  failed
+}
+
+// ============================================================================
+// DEVICES
+// ============================================================================
+
+model Device {
+  id              String       @id @default(uuid())
+  farmId          String
+  type            DeviceType
+  model           String       @db.VarChar(100)
+  firmwareVersion String       @db.VarChar(50)
+  status          DeviceStatus @default(offline)
+  location        Json         // Location object
+  configuration   Json         @default("{}")
+  metadata        Json         @default("{}")
+  securityKey     String       @db.VarChar(255)
+  lastSeen        DateTime     @default(now())
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+  
+  // Relations
+  farm            Farm         @relation(fields: [farmId], references: [id], onDelete: Cascade)
+  alerts          Alert[]
+  
+  @@index([farmId])
+  @@index([type])
+  @@index([status])
+  @@index([lastSeen])
+  @@map("devices")
+}
+
+enum DeviceType {
+  sensor
+  valve
+  pump
+  controller
+}
+
+enum DeviceStatus {
+  online
+  offline
+  maintenance
+  error
+}
+
+// ============================================================================
+// ALERTS
+// ============================================================================
+
+model Alert {
+  id              String        @id @default(uuid())
+  type            AlertType
+  severity        AlertSeverity
+  title           String        @db.VarChar(200)
+  message         String        @db.Text
+  sourceId        String        // device/sensor ID
+  createdAt       DateTime      @default(now())
+  acknowledgedAt  DateTime?
+  acknowledgedBy  String?
+  resolvedAt      DateTime?
+  notes           String?       @db.Text
+  
+  // Relations
+  source          Device        @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  acknowledger    User?         @relation("AlertAcknowledger", fields: [acknowledgedBy], references: [id])
+  
+  @@index([sourceId])
+  @@index([type])
+  @@index([severity])
+  @@index([createdAt])
+  @@index([acknowledgedBy])
+  @@map("alerts")
+}
+
+enum AlertType {
+  sensor_error
+  device_offline
+  threshold_exceeded
+  low_water
+  system_error
+}
+
+enum AlertSeverity {
+  low
+  medium
+  high
+  critical
+}
+
+// ============================================================================
+// WATER SOURCES
+// ============================================================================
+
+model WaterSource {
+  id           String           @id @default(uuid())
+  farmId       String
+  name         String           @db.VarChar(100)
+  type         WaterSourceType
+  capacity     Float            // liters
+  currentLevel Float            // liters
+  pumpRate     Float            // liters/minute
+  location     Json             // Location object
+  isActive     Boolean          @default(true)
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+  
+  // Relations
+  farm         Farm             @relation(fields: [farmId], references: [id], onDelete: Cascade)
+  
+  @@index([farmId])
+  @@index([isActive])
+  @@map("water_sources")
+}
+
+enum WaterSourceType {
+  well
+  reservoir
+  river
+  municipal
+}
+
+// ============================================================================
+// REPORTS
+// ============================================================================
+
+model Report {
+  id          String   @id @default(uuid())
+  config      Json     // ReportConfig object
+  generatedAt DateTime @default(now())
+  generatedBy String
+  fileUrl     String?  @db.Text
+  data        Json     @default("{}")
+  
+  // Relations
+  generator   User     @relation(fields: [generatedBy], references: [id])
+  
+  @@index([generatedBy])
+  @@index([generatedAt])
+  @@map("reports")
+}
+
+// ============================================================================
+// WEATHER DATA (Cached)
+// ============================================================================
+
+model WeatherCache {
+  id        String   @id @default(uuid())
+  location  Json     // Location object
+  timestamp DateTime @default(now())
+  forecasts Json     // Array of DailyForecast
+  expiresAt DateTime
+  
+  @@index([expiresAt])
+  @@map("weather_cache")
+}

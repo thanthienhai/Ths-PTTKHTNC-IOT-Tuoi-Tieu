@@ -1,0 +1,43 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: analytics-service
+  namespace: irrigation-production
+  labels:
+    app: analytics-service
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: analytics-service
+  template:
+    metadata:
+      labels:
+        app: analytics-service
+    spec:
+      containers:
+      - name: analytics-service
+        image: ${DOCKER_USERNAME}/irrigation-analytics-service:${VERSION:-latest}
+        ports:
+        - containerPort: 3007
+        env:
+        - name: PORT
+          value: "3007"
+        envFrom:
+        - secretRef:
+            name: irrigation-secrets
+        - configMapRef:
+            name: irrigation-config
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "500m"
+          limits:
+            memory: "1Gi"
+            cpu: "1000m"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 3007
+          initialDelaySeconds: 30
+          periodSeconds: 10

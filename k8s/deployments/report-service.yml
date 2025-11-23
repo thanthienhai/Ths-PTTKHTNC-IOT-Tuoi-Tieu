@@ -1,0 +1,43 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: report-service
+  namespace: irrigation-production
+  labels:
+    app: report-service
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: report-service
+  template:
+    metadata:
+      labels:
+        app: report-service
+    spec:
+      containers:
+      - name: report-service
+        image: ${DOCKER_USERNAME}/irrigation-report-service:${VERSION:-latest}
+        ports:
+        - containerPort: 3008
+        env:
+        - name: PORT
+          value: "3008"
+        envFrom:
+        - secretRef:
+            name: irrigation-secrets
+        - configMapRef:
+            name: irrigation-config
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "500m"
+          limits:
+            memory: "1Gi"
+            cpu: "1000m"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 3008
+          initialDelaySeconds: 30
+          periodSeconds: 10

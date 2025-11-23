@@ -1,0 +1,43 @@
+# Edge Controller Configuration
+
+# Cloud connection
+cloud:
+  url: "http://api-gateway:3000"
+  device_id: "edge-001"
+  security_key: "your-security-key-here"
+
+# Intervals (seconds)
+intervals:
+  sensor_read: 300  # 5 minutes
+  cloud_sync: 60    # 1 minute
+  cleanup: 3600     # 1 hour
+
+# Sensors configuration
+sensors:
+  - id: "sensor-001"
+    type: "soil_moisture"
+    pin: 17
+    calibration: [0, 100]
+  
+  - id: "sensor-002"
+    type: "temperature"
+    pin: 27
+    calibration: [-10, 50]
+
+# Actuators configuration
+actuators:
+  - id: "valve-001"
+    zone_id: "zone-001"
+    pin: 22
+    type: "valve"
+  
+  - id: "pump-001"
+    pin: 23
+    type: "pump"
+    pwm: true
+
+# Local storage
+storage:
+  database: "edge_data.db"
+  max_size_mb: 100
+  cleanup_after_days: 7
